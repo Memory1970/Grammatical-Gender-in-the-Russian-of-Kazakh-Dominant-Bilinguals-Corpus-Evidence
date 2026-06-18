@@ -152,8 +152,8 @@ fm_pal <- sum(directional$Direction == "F=>M" & is_palatal)
 mf_pal <- sum(directional$Direction == "M=>F" & is_palatal)
 cat("=== Soft-final (palatalized) asymmetry ===\n")
 cat("  F=>M palatalized:", fm_pal, " M=>F palatalized:", mf_pal, "\n")
-cat("  exact binomial p =",
-    round(binom.test(fm_pal, fm_pal + mf_pal)$p.value, 8), "\n\n")
+p_softfinal <- binom.test(fm_pal, fm_pal + mf_pal)$p.value
+cat("  exact binomial p =", round(p_softfinal, 8), "\n\n")
 # Expected: 50 vs 7, p < .001 (i.e. "fifty errors toward masculine, only seven toward feminine")
 
 # ----------------------------------------------------------------------------
@@ -182,10 +182,11 @@ cat(sprintf("Overall density difference: chi2(2) = %.2f, p = %.3g\n",
 pair_chi <- function(a, b) {
   m <- rbind(c(lev_counts[a], tokens_level[a] - lev_counts[a]),
              c(lev_counts[b], tokens_level[b] - lev_counts[b]))
-  chisq.test(m, correct = TRUE)$statistic
+  chisq.test(m, correct = TRUE)
 }
-cat(sprintf("  IL vs IM: chi2(1) = %.2f\n", pair_chi("IL", "IM")))   # 70.54
-cat(sprintf("  IM vs IH: chi2(1) = %.2f\n", pair_chi("IM", "IH")))   # 24.29
+ilim <- pair_chi("IL", "IM"); imih <- pair_chi("IM", "IH")
+cat(sprintf("  IL vs IM: chi2(1) = %.2f\n", ilim$statistic))   # 70.54
+cat(sprintf("  IM vs IH: chi2(1) = %.2f\n", imih$statistic))   # 24.29
 
 # Cochran-Armitage trend test (scores 0,1,2 for IL, IM, IH)
 ca_trend <- function(x, n, scores) {
@@ -301,6 +302,35 @@ print(c(
                             !grepl("target", tolower(directional$Subtypes)))
 ))
 # Expected: 23, 11
+
+# ----------------------------------------------------------------------------
+# 10b. MULTIPLE-COMPARISON CHECK (Bonferroni)
+# ----------------------------------------------------------------------------
+# Collect the p-values of the tests reported as significant in the paper and
+# confirm each survives a Bonferroni correction at alpha = .05. The
+# non-significant tests (F<->N and M<->N exchange; direction x proficiency)
+# are not included here, as they are not reported as significant.
+sig_pvals <- c(
+  headline_toward_masc      = chi_headline$p.value,                 # Yates chi2
+  exchange_F_M              = binom.test(253, 253 + 81)$p.value,    # directional asymmetry
+  soft_final_F_M            = p_softfinal,                          # palatalized asymmetry
+  proficiency_overall       = chi_prof$p.value,                     # error density across levels
+  proficiency_IL_vs_IM      = ilim$p.value,                         # pairwise
+  proficiency_IM_vs_IH      = imih$p.value                          # pairwise
+)
+n_comparisons <- length(sig_pvals)
+threshold <- 0.05 / n_comparisons
+cat("=== Bonferroni check (alpha = .05) ===\n")
+cat(sprintf("Comparisons: %d; Bonferroni threshold = %.5f\n", n_comparisons, threshold))
+print(data.frame(
+  p_value  = signif(sig_pvals, 3),
+  survives = sig_pvals < threshold,
+  row.names = names(sig_pvals)
+))
+cat(sprintf("All significant results survive Bonferroni: %s\n\n",
+            all(sig_pvals < threshold)))
+# (The Cochran-Armitage trend, z = -11.43, corresponds to p far below any
+#  threshold and is likewise robust to correction.)
 
 # ----------------------------------------------------------------------------
 # 11. OVERALL ERROR RATE
