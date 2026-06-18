@@ -1,0 +1,312 @@
+# =============================================================================
+# Grammatical Gender in the Russian of Kazakh-Dominant Bilinguals: Corpus Evidence
+# Statistical analysis script
+#
+# Reproduces every quantitative result reported in the paper from the annotated
+# corpus (annotated_corpus_repository.xlsx).
+#
+# Input : annotated_corpus_repository.xlsx  (746 rows; one row per error)
+# Output: console tables + values matching Tables 2-6 and the prose statistics.
+#
+# Requirements: R (>= 4.0). Packages: readxl, dplyr, tidyr.
+#   install.packages(c("readxl", "dplyr", "tidyr"))
+# =============================================================================
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+
+# ----------------------------------------------------------------------------
+# 0. Settings: subcorpus token counts (denominators for rates per 10,000 tokens)
+# ----------------------------------------------------------------------------
+tokens_total <- 175308          # all tokens in the analysed subcorpus
+tokens_level <- c(IL = 30712,   # Intermediate Low
+                  IM = 87522,   # Intermediate Mid
+                  IH = 51345)   # Intermediate High
+
+# ----------------------------------------------------------------------------
+# 1. Load data
+# ----------------------------------------------------------------------------
+# Adjust the path if the file is in a sub-folder of your repository.
+corpus <- read_excel("annotated_corpus_repository.xlsx")
+
+# Normalise text fields and build logical correlate flags.
+yn <- function(x) toupper(trimws(ifelse(is.na(x), "", as.character(x)))) == "Y"
+
+corpus <- corpus %>%
+  mutate(
+    Direction = trimws(as.character(Direction)),
+    Type      = trimws(as.character(Type)),
+    Level     = trimws(as.character(Level)),
+    Phonetic      = yn(Phonetic),
+    Morphological = yn(Morphological),
+    Semantic      = yn(Semantic),
+    Syntactic     = yn(Syntactic),
+    any_correlate = Phonetic | Morphological | Semantic | Syntactic
+  )
+
+# Directional subset (excludes the two directionally indeterminate errors).
+dir6 <- c("F=>M", "F=>N", "M=>F", "M=>N", "N=>F", "N=>M")
+directional <- corpus %>% filter(Direction %in% dir6)
+
+cat("Total errors (incl. indeterminate):", nrow(corpus), "\n")          # 746
+cat("Directional errors:", nrow(directional), "\n")                     # 744
+cat("Indeterminate errors:", nrow(corpus) - nrow(directional), "\n\n")  # 2
+
+# ----------------------------------------------------------------------------
+# 2. TABLE 2 — Number of errors by direction
+# ----------------------------------------------------------------------------
+table2 <- directional %>%
+  count(Direction) %>%
+  mutate(pct = round(100 * n / sum(n), 1)) %>%
+  arrange(factor(Direction, levels = dir6))
+cat("=== Table 2: errors by direction ===\n"); print(table2); cat("\n")
+# Expected: F=>M 253 (34.0%), F=>N 136 (18.3%), M=>F 81 (10.9%),
+#           M=>N 58 (7.8%), N=>F 139 (18.7%), N=>M 77 (10.3%)
+
+# ----------------------------------------------------------------------------
+# 3. TABLE 3 — Total gains and losses by gender
+# ----------------------------------------------------------------------------
+gain_loss <- function(g) {
+  gain <- sum(endsWith(directional$Direction, paste0(">", g)))
+  loss <- sum(startsWith(directional$Direction, paste0(g, "=")))
+  c(gain = gain, loss = loss)
+}
+table3 <- t(sapply(c(M = "M", F = "F", N = "N"), gain_loss))
+cat("=== Table 3: gains and losses ===\n"); print(table3); cat("\n")
+# Expected: Masculine 330/139, Feminine 220/389, Neuter 194/216
+
+# Exact binomial tests of directional asymmetry (symmetric exchange = null p .5)
+cat("Exchange asymmetries (exact binomial):\n")
+cat("  F<->M:", round(binom.test(253, 253 + 81)$p.value, 6), "\n")  # p < .001
+cat("  F<->N:", round(binom.test(136, 136 + 139)$p.value, 3), "\n") # p = .90
+cat("  M<->N:", round(binom.test(58, 58 + 77)$p.value, 3), "\n\n")  # p = .12
+
+# ----------------------------------------------------------------------------
+# 4. TABLE 4 — Distribution of formal correlates by direction
+# ----------------------------------------------------------------------------
+table4 <- directional %>%
+  group_by(Direction) %>%
+  summarise(
+    n         = n(),
+    Phonetic  = sum(Phonetic),
+    Morph     = sum(Morphological),
+    Semantic  = sum(Semantic),
+    Syntactic = sum(Syntactic),
+    No_corr   = sum(!any_correlate),
+    .groups = "drop"
+  ) %>%
+  arrange(factor(Direction, levels = dir6))
+cat("=== Table 4: formal correlates by direction ===\n"); print(table4); cat("\n")
+# Expected rows:
+#   F=>M 253 | 3 | 51 | 1 | 0 | 198
+#   F=>N 136 | 99 | 0 | 0 | 14 | 25
+#   M=>F  81 | 0 | 14 | 8 | 4 | 55
+#   M=>N  58 | 1 | 1 | 0 | 16 | 41
+#   N=>F 139 | 118 | 3 | 0 | 0 | 18
+#   N=>M  77 | 0 | 4 | 0 | 0 | 73
+
+# Overall phonetic share
+cat("Phonetic correlate present in",
+    sum(directional$Phonetic), "of", nrow(corpus), "errors (",
+    round(100 * sum(directional$Phonetic) / nrow(corpus), 1), "% )\n\n")
+# Expected: 221 of 746 (29.6%)
+
+# ----------------------------------------------------------------------------
+# 5. HEADLINE RESULT — toward-masculine vs other directions carry a correlate
+# ----------------------------------------------------------------------------
+directional <- directional %>%
+  mutate(toward_masc = Direction %in% c("F=>M", "N=>M"))
+
+headline <- table(toward_masc = directional$toward_masc,
+                   has_correlate = directional$any_correlate)
+cat("=== Headline 2x2 (toward-masc x has-correlate) ===\n"); print(headline)
+
+prop_M     <- mean(directional$any_correlate[directional$toward_masc])
+prop_other <- mean(directional$any_correlate[!directional$toward_masc])
+cat(sprintf("Toward-masculine carry a correlate: %.1f%% (%d/%d)\n",
+            100 * prop_M,
+            sum(directional$any_correlate & directional$toward_masc),
+            sum(directional$toward_masc)))
+cat(sprintf("Other directions carry a correlate: %.1f%% (%d/%d)\n",
+            100 * prop_other,
+            sum(directional$any_correlate & !directional$toward_masc),
+            sum(!directional$toward_masc)))
+chi_headline <- chisq.test(headline, correct = TRUE)   # Yates-corrected
+cat(sprintf("Yates-corrected chi2(1) = %.1f, p = %.3g\n\n",
+            chi_headline$statistic, chi_headline$p.value))
+# Expected: 17.9% vs 66.4%; chi2 = 173.0, p < .001
+
+# F=>M unmotivated share
+fm <- directional %>% filter(Direction == "F=>M")
+cat(sprintf("F=>M with no correlate: %d/%d (%.0f%%)\n\n",
+            sum(!fm$any_correlate), nrow(fm),
+            100 * mean(!fm$any_correlate)))
+# Expected: 198/253 (78%)
+
+# ----------------------------------------------------------------------------
+# 6. SOFT-FINAL (palatalized) ASYMMETRY  (§4.4)
+# ----------------------------------------------------------------------------
+is_palatal <- grepl("palataliz|consonant", tolower(directional$Subtypes))
+fm_pal <- sum(directional$Direction == "F=>M" & is_palatal)
+mf_pal <- sum(directional$Direction == "M=>F" & is_palatal)
+cat("=== Soft-final (palatalized) asymmetry ===\n")
+cat("  F=>M palatalized:", fm_pal, " M=>F palatalized:", mf_pal, "\n")
+cat("  exact binomial p =",
+    round(binom.test(fm_pal, fm_pal + mf_pal)$p.value, 8), "\n\n")
+# Expected: 50 vs 7, p < .001 (i.e. "fifty errors toward masculine, only seven toward feminine")
+
+# ----------------------------------------------------------------------------
+# 7. PROFICIENCY (§4.5) — Tables 5 & 6
+# ----------------------------------------------------------------------------
+lev_counts <- sapply(c("IL", "IM", "IH"), function(L) sum(corpus$Level == L, na.rm = TRUE))
+
+# Table 5: error density per 10,000 tokens
+table5 <- data.frame(
+  Level   = c("IL", "IM", "IH"),
+  errors  = lev_counts,
+  tokens  = tokens_level[c("IL", "IM", "IH")],
+  per10k  = round(10000 * lev_counts / tokens_level[c("IL", "IM", "IH")], 2)
+)
+cat("=== Table 5: error density by level ===\n"); print(table5, row.names = FALSE); cat("\n")
+# Expected: IL 80.10, IM 40.33, IH 24.15
+
+# Overall test of density differences (errors vs non-error tokens)
+prof_mat <- rbind(lev_counts, tokens_level[c("IL", "IM", "IH")] - lev_counts)
+chi_prof <- chisq.test(prof_mat)
+cat(sprintf("Overall density difference: chi2(2) = %.2f, p = %.3g\n",
+            chi_prof$statistic, chi_prof$p.value))
+# Expected: chi2(2) = 143.95
+
+# Pairwise (Yates-corrected)
+pair_chi <- function(a, b) {
+  m <- rbind(c(lev_counts[a], tokens_level[a] - lev_counts[a]),
+             c(lev_counts[b], tokens_level[b] - lev_counts[b]))
+  chisq.test(m, correct = TRUE)$statistic
+}
+cat(sprintf("  IL vs IM: chi2(1) = %.2f\n", pair_chi("IL", "IM")))   # 70.54
+cat(sprintf("  IM vs IH: chi2(1) = %.2f\n", pair_chi("IM", "IH")))   # 24.29
+
+# Cochran-Armitage trend test (scores 0,1,2 for IL, IM, IH)
+ca_trend <- function(x, n, scores) {
+  N <- sum(n); R <- sum(x); pbar <- R / N
+  num <- sum(x * scores) - R * sum(n * scores) / N
+  var <- pbar * (1 - pbar) * (sum(n * scores^2) - (sum(n * scores))^2 / N)
+  num / sqrt(var)
+}
+z_ca <- ca_trend(lev_counts,
+                 tokens_level[c("IL", "IM", "IH")],
+                 scores = c(0, 1, 2))
+cat(sprintf("  Cochran-Armitage trend: z = %.2f\n\n", z_ca))   # -11.43
+
+# Table 6: direction rates per 10,000 by level
+table6 <- directional %>%
+  filter(Level %in% c("IL", "IM", "IH")) %>%
+  count(Level, Direction) %>%
+  complete(Level = c("IL", "IM", "IH"), Direction = dir6, fill = list(n = 0)) %>%
+  mutate(per10k = round(10000 * n / tokens_level[Level], 2)) %>%
+  select(Level, Direction, per10k) %>%
+  pivot_wider(names_from = Direction, values_from = per10k) %>%
+  arrange(factor(Level, levels = c("IL", "IM", "IH")))
+cat("=== Table 6: direction rates per 10,000 by level ===\n")
+print(as.data.frame(table6), row.names = FALSE); cat("\n")
+
+# Direction distribution x proficiency: homogeneity test
+dir_prof <- table(directional$Level[directional$Level %in% c("IL","IM","IH")],
+                  directional$Direction[directional$Level %in% c("IL","IM","IH")])
+chi_dp <- chisq.test(dir_prof)
+cramers_v <- sqrt(chi_dp$statistic /
+                    (sum(dir_prof) * (min(dim(dir_prof)) - 1)))
+cat(sprintf("Direction x proficiency: chi2(%d) = %.2f, p = %.3f, Cramer's V = %.3f\n\n",
+            chi_dp$parameter, chi_dp$statistic, chi_dp$p.value, cramers_v))
+# Expected: chi2(10) = 5.22, p = .876, V = .060
+
+# ----------------------------------------------------------------------------
+# 8. SPEAKER PROFILE (§4.6)
+# ----------------------------------------------------------------------------
+auth <- corpus %>%
+  filter(!is.na(Author), trimws(as.character(Author)) != "") %>%
+  mutate(Author = trimws(as.character(Author)),
+         toward_masc = Direction %in% c("F=>M", "N=>M"))
+
+per_author <- auth %>%
+  group_by(Author) %>%
+  summarise(n_errors     = n(),
+            n_directions = n_distinct(Direction),
+            prop_masc    = mean(toward_masc),
+            .groups = "drop")
+
+cat("=== Speaker profile ===\n")
+cat("Authors:", nrow(per_author), "\n")                                   # 205
+cat("Median errors/author:", median(per_author$n_errors), "\n")          # 2
+cat("Maximum errors by one author:", max(per_author$n_errors), "\n")     # 28
+
+ge5 <- per_author %>% filter(n_errors >= 5)
+cat("Authors with >= 5 errors:", nrow(ge5),
+    "accounting for", sum(ge5$n_errors), "errors\n")                      # 42, 422
+cat("  median toward-masculine share (>=5 authors):",
+    round(100 * median(ge5$prop_masc)), "%\n")                           # 47%
+
+# Spearman correlation: number of errors vs number of directions
+rho <- cor(per_author$n_errors, per_author$n_directions, method = "spearman")
+cat(sprintf("  Spearman rho (errors vs directions) = %.2f\n\n", rho))    # .88
+
+# ----------------------------------------------------------------------------
+# 9. DECLENSIONAL REANALYSIS & DOMAIN DEPTH (§4.3 / §5.2)
+# ----------------------------------------------------------------------------
+decl <- directional %>% filter(Type == "Decl")
+cat("=== Declensional reanalysis ===\n")
+print(decl %>% count(Direction) %>% arrange(factor(Direction, levels = dir6)))
+cat("Total declensional:", nrow(decl),
+    "| N=>F declensional:", sum(decl$Direction == "N=>F"), "\n\n")
+# Expected: total 31; N=>F 19
+
+# F=>N and N=>F by domain depth (orthography < agreement < declension)
+domain_depth <- function(d) {
+  s <- directional %>% filter(Direction == d)
+  orth <- sum(s$Type %in% c("AgrAdjOrth","AgrVerbOrth","Orth","AgrVerbOrth+AgrAdjOrth"))
+  agr  <- sum(s$Type %in% c("AgrAdj","AgrVerb","AgrVerb+AgrAdj"))
+  dec  <- sum(s$Type == "Decl")
+  c(orthographic = orth, agreement = agr, declensional = dec, n = nrow(s))
+}
+cat("F=>N domain depth:\n"); print(domain_depth("F=>N"))   # orth 86, agr 46, decl 1
+cat("N=>F domain depth:\n"); print(domain_depth("N=>F"))   # orth 57, agr 55, decl 19
+cat("\n")
+
+# ----------------------------------------------------------------------------
+# 10. MORPHOLOGICAL & SYNTACTIC SUBTYPE BREAKDOWN (Table 4 note)
+# ----------------------------------------------------------------------------
+sub_of <- function(flagcol, patterns) {
+  s <- directional %>% filter(.data[[flagcol]])
+  sapply(patterns, function(p) sum(grepl(p, tolower(s$Subtypes))))
+}
+cat("=== Morphological subtypes ===\n")
+print(c(
+  `consonant/soft-sign` = sum(directional$Morphological &
+                                grepl("palataliz|consonant", tolower(directional$Subtypes))),
+  `-a ending`           = sum(directional$Morphological &
+                                grepl("-a ending", tolower(directional$Subtypes))),
+  `indeclinable`        = sum(directional$Morphological &
+                                grepl("indeclin", tolower(directional$Subtypes))),
+  `case homonymy`       = sum(directional$Morphological &
+                                grepl("homonym", tolower(directional$Subtypes)))
+))
+# Expected: 57, 7, 6, 3
+cat("\n=== Syntactic subtypes ===\n")
+print(c(
+  `target precedes` = sum(directional$Syntactic &
+                            grepl("target", tolower(directional$Subtypes))),
+  `impersonal`      = sum(directional$Syntactic &
+                            grepl("impersonal", tolower(directional$Subtypes)) &
+                            !grepl("target", tolower(directional$Subtypes)))
+))
+# Expected: 23, 11
+
+# ----------------------------------------------------------------------------
+# 11. OVERALL ERROR RATE
+# ----------------------------------------------------------------------------
+cat(sprintf("\nOverall error rate: %.2f per 10,000 tokens (%d / %d)\n",
+            10000 * nrow(corpus) / tokens_total, nrow(corpus), tokens_total))
+# Expected: 42.55
+
+cat("\n--- analysis complete ---\n")
