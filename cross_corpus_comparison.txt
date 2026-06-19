@@ -1,0 +1,83 @@
+# =============================================================================
+# Grammatical Gender in the Russian of Kazakh-Dominant Bilinguals: Corpus Evidence
+# Cross-corpus comparison script (Section 5.3)
+#
+# Reproduces the gender-error RATES and the between-corpus chi-square tests
+# reported in Section 5.3, comparing the Kazakh-dominant subcorpus with the
+# French, German, and Finnish heritage and L2 subcorpora of the RLC.
+#
+# All counts are gender-error context counts and token totals taken from the
+# RLC extractions described in Section 5.3. Edit the table below if any count
+# is updated; everything downstream recomputes automatically.
+#
+# Requirements: base R only (no packages).
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# 1. Corpus counts: gender-error contexts and token totals
+#    'errors' = gender-error contexts; 'tokens' = subcorpus size.
+#    raw  = unique sentence contexts prior to manual cleaning
+#    clean = after manual removal of duplicates / non-errors
+# ----------------------------------------------------------------------------
+corpora <- data.frame(
+  label  = c("Kazakh (raw)", "Kazakh (cleaned)",
+             "French L2", "Finnish L2", "German L2",
+             "French heritage", "German heritage",
+             "Finnish heritage (raw)", "Finnish heritage (cleaned)"),
+  errors = c(899, 746,
+             407, 931, 88,
+             38, 16,
+             188, 70),
+  tokens = c(175308, 175308,
+             79548, 210848, 36884,
+             31132, 12243,
+             277546, 277546),
+  stringsAsFactors = FALSE
+)
+
+# ----------------------------------------------------------------------------
+# 2. Rates per 10,000 tokens
+# ----------------------------------------------------------------------------
+corpora$per10k <- round(10000 * corpora$errors / corpora$tokens, 2)
+cat("=== Gender-error rates per 10,000 tokens ===\n")
+print(corpora[, c("label", "errors", "tokens", "per10k")], row.names = FALSE)
+cat("\n")
+
+# ----------------------------------------------------------------------------
+# 3. Helper: Yates-corrected 2x2 chi-square on error vs non-error token counts
+# ----------------------------------------------------------------------------
+get <- function(lbl) {
+  row <- corpora[corpora$label == lbl, ]
+  c(errors = row$errors, tokens = row$tokens)
+}
+
+compare <- function(lab_a, lab_b) {
+  a <- get(lab_a); b <- get(lab_b)
+  m <- rbind(c(a["errors"], a["tokens"] - a["errors"]),
+             c(b["errors"], b["tokens"] - b["errors"]))
+  test <- chisq.test(m, correct = TRUE)   # Yates continuity correction
+  cat(sprintf("%-28s vs %-28s  chi2(1) = %7.2f,  p = %.3g\n",
+              lab_a, lab_b, test$statistic, test$p.value))
+  invisible(test)
+}
+
+# ----------------------------------------------------------------------------
+# 4. Comparisons reported in Section 5.3
+# ----------------------------------------------------------------------------
+cat("=== Between-corpus comparisons (Yates-corrected chi-square) ===\n")
+
+cat("\n-- L2 learners vs Kazakh (raw) --\n")
+compare("Kazakh (raw)", "French L2")     # expect chi2 ~ 0.00, n.s.
+compare("Kazakh (raw)", "Finnish L2")    # expect chi2 ~ 10.16, p ~ .001
+compare("Kazakh (raw)", "German L2")     # expect chi2 ~ 48.90, p < .001
+
+cat("\n-- Heritage speakers vs Kazakh (raw) --\n")
+compare("Kazakh (raw)", "French heritage")        # expect chi2 ~ 88.48
+compare("Kazakh (raw)", "German heritage")        # expect chi2 ~ 33.64
+compare("Kazakh (raw)", "Finnish heritage (raw)") # expect chi2 ~ 886.97
+
+cat("\n-- Finnish heritage: cleaned vs Kazakh cleaned, and vs Finnish L2 --\n")
+compare("Kazakh (cleaned)", "Finnish heritage (cleaned)")  # expect chi2 ~ 955.05
+compare("Finnish heritage (raw)", "Finnish L2")            # expect chi2 ~ 730.82
+
+cat("\n--- cross-corpus comparison complete ---\n")
